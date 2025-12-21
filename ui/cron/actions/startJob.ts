@@ -1,9 +1,10 @@
 import prisma from '../prisma';
 import { Job } from '@prisma/client';
-import { spawn } from 'child_process';
+import { spawn, SpawnOptions, StdioOptions } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { TOOLKIT_ROOT, getTrainingFolder, getHFToken } from '../paths';
+import { env } from 'process';
 const isWindows = process.platform === 'win32';
 
 const startAndWatchJob = (job: Job) => {
@@ -99,6 +100,8 @@ const startAndWatchJob = (job: Job) => {
 
     try {
       let subprocess;
+      let registerSpawnListeners = env.REGISTER_SPAWN_LISTENERS?.toLowerCase() === 'true' || false;
+      let stdioMode: StdioOptions = registerSpawnListeners ? 'pipe' : 'ignore';
 
       if (isWindows) {
         // Spawn Python directly on Windows so the process can survive parent exit
@@ -110,18 +113,41 @@ const startAndWatchJob = (job: Job) => {
           cwd: TOOLKIT_ROOT,
           detached: true,
           windowsHide: true,
-          stdio: 'ignore', // don't tie stdio to parent
+          stdio: stdioMode
         });
       } else {
         // For non-Windows platforms, fully detach and ignore stdio so it survives daemon-like
         subprocess = spawn(pythonPath, args, {
           detached: true,
-          stdio: 'ignore',
+          stdio: stdioMode,
           env: {
             ...process.env,
             ...additionalEnv,
           },
           cwd: TOOLKIT_ROOT,
+        });
+      }
+
+      if (registerSpawnListeners) {
+        console.log('Registering spawn listeners');
+        // Listen for data from stdout
+        subprocess?.stdout?.on('data', (data) => {
+          console.log(`stdout: ${data}`);
+        });
+
+        // Listen for data from stderr
+        subprocess?.stderr?.on('data', (data) => {
+          console.error(`stderr: ${data}`);
+        });
+
+        // Listen for the process to close
+        subprocess?.on('close', (code) => {
+          console.log(`Child process closed with code ${code}`);
+        });
+
+        // Handle errors
+        subprocess?.on('error', (err) => {
+            console.error('Failed to start subprocess:', err.message);
         });
       }
 
