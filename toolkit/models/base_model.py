@@ -19,7 +19,7 @@ from torchvision.transforms import Resize, transforms
 from toolkit.clip_vision_adapter import ClipVisionAdapter
 from toolkit.custom_adapter import CustomAdapter
 from toolkit.ip_adapter import IPAdapter
-from toolkit.config_modules import ModelConfig, GenerateImageConfig, ModelArch
+from toolkit.config_modules import ModelConfig, GenerateImageConfig, ModelArch, NetworkConfig
 from toolkit.models.decorator import Decorator
 from toolkit.paths import KEYMAPS_ROOT
 from toolkit.prompt_utils import inject_trigger_into_prompt, PromptEmbeds, concat_prompt_embeds
@@ -1579,6 +1579,58 @@ class BaseModel:
     def get_base_model_version(self) -> str:
         # override in child classes to get the base model version
         return "unknown"
+
+    def merge_lora(self, lora_path, weight=1.0):
+        from toolkit.lora_special import LoRASpecialNetwork
+        from safetensors.torch import load_file
+        
+        if not os.path.exists(lora_path):
+            raise FileNotFoundError(f"LoRA path for merging not found: {lora_path}")
+            
+        print_acc(f"Merging LoRA from {lora_path} with weight {weight}")
+        
+        lora_state_dict = load_file(lora_path)
+        
+        # guess dim
+        linear_dim = 4
+        for key in lora_state_dict.keys():
+            if 'lora_A.weight' in key or 'lora_down.weight' in key:
+                linear_dim = lora_state_dict[key].shape[0]
+                break
+        
+        network_config = NetworkConfig(
+            linear=linear_dim,
+            linear_alpha=linear_dim,
+        )
+        
+        target_lin_modules = getattr(self, 'target_lora_modules', None)
+        
+        merge_network = LoRASpecialNetwork(
+            text_encoder=self.text_encoder,
+            unet=self.model,
+            lora_dim=network_config.linear,
+            multiplier=1.0,
+            alpha=network_config.linear_alpha,
+            train_unet=True,
+            train_text_encoder=True,
+            is_flux=self.is_flux,
+            network_config=network_config,
+            network_type=network_config.type,
+            is_transformer=self.is_transformer,
+            target_lin_modules=target_lin_modules,
+            base_model=self
+        )
+        merge_network.apply_to(
+            self.text_encoder,
+            self.model,
+            apply_text_encoder=True,
+            apply_unet=True
+        )
+        merge_network.force_to(self.device_torch, dtype=self.torch_dtype)
+        merge_network.load_weights(lora_state_dict)
+        merge_network.merge_in(weight)
+        merge_network.is_active = False
+        merge_network.detach()
 
     def get_model_to_train(self):
         # called to get model to attach LoRAs to. Can be overridden in child classes

@@ -28,7 +28,7 @@ from toolkit.dequantize import patch_dequantization_on_save
 from toolkit.ip_adapter import IPAdapter
 from toolkit.util.vae import load_vae
 from toolkit import train_tools
-from toolkit.config_modules import ModelConfig, GenerateImageConfig, ModelArch
+from toolkit.config_modules import ModelConfig, GenerateImageConfig, ModelArch, NetworkConfig
 from toolkit.metadata import get_meta_for_safetensors
 from toolkit.models.decorator import Decorator
 from toolkit.paths import KEYMAPS_ROOT
@@ -1066,6 +1066,68 @@ class StableDiffusion:
                 te.eval()
         else:
             self.text_encoder.eval()
+
+    def merge_lora(self, lora_path, weight=1.0):
+        from toolkit.lora_special import LoRASpecialNetwork
+        from safetensors.torch import load_file
+        
+        if not os.path.exists(lora_path):
+            raise FileNotFoundError(f"LoRA path for merging not found: {lora_path}")
+            
+        print_acc(f"Merging LoRA from {lora_path} with weight {weight}")
+        
+        lora_state_dict = load_file(lora_path)
+        
+        if self.is_flux:
+            # flux doesn't support native fusion yet in diffusers for all models
+            # use our own special network to merge
+            
+            # guess dim from first found lora_A
+            linear_dim = 4 # default
+            for key in lora_state_dict.keys():
+                if 'lora_A.weight' in key or 'lora_down.weight' in key:
+                    linear_dim = lora_state_dict[key].shape[0]
+                    break
+            
+            network_config = NetworkConfig(
+                linear=linear_dim,
+                linear_alpha=linear_dim,
+            )
+            
+            target_lin_modules = getattr(self, 'target_lora_modules', None)
+            
+            merge_network = LoRASpecialNetwork(
+                text_encoder=self.text_encoder,
+                unet=self.unet,
+                lora_dim=network_config.linear,
+                multiplier=1.0,
+                alpha=network_config.linear_alpha,
+                train_unet=True,
+                train_text_encoder=True,
+                is_flux=True,
+                network_config=network_config,
+                network_type=network_config.type,
+                is_transformer=getattr(self, 'is_transformer', False),
+                target_lin_modules=target_lin_modules,
+                base_model=self
+            )
+            merge_network.apply_to(
+                self.text_encoder,
+                self.unet,
+                apply_text_encoder=True,
+                apply_unet=True
+            )
+            merge_network.force_to(self.device_torch, dtype=self.torch_dtype)
+            merge_network.load_weights(lora_state_dict)
+            merge_network.merge_in(weight)
+            # it is now merged, we can deactivate the network
+            merge_network.is_active = False
+            merge_network.detach()
+        else:
+            # use native fusion for other models
+            self.pipeline.load_lora_weights(lora_path, adapter_name="merge_lora")
+            self.pipeline.fuse_lora(lora_scale=weight)
+            self.pipeline.unload_lora_weights()
 
     def load_refiner(self):
         # for now, we are just going to rely on the TE from the base model

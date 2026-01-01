@@ -115,6 +115,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
         # update modelconfig dtype to match train
         model_config['dtype'] = self.train_config.dtype
+        if self.train_config.merge_lora_path is not None and 'merge_lora_path' not in model_config:
+            model_config['merge_lora_path'] = self.train_config.merge_lora_path
+        if self.train_config.merge_lora_weight is not None and 'merge_lora_weight' not in model_config:
+            model_config['merge_lora_weight'] = self.train_config.merge_lora_weight
         self.model_config = ModelConfig(**model_config)
 
         self.save_config = SaveConfig(**self.get_conf('save', {}))
@@ -1563,6 +1567,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
         self.hook_after_sd_init_before_load()
         # run base sd process run
         self.sd.load_model()
+        
+        if self.model_config.merge_lora_path is not None:
+            self.sd.merge_lora(self.model_config.merge_lora_path, self.model_config.merge_lora_weight)
         
         # compile the model if needed
         if self.model_config.compile:

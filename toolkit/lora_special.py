@@ -134,6 +134,10 @@ class LoRAModule(ToolkitModuleMixin, ExtractableModuleMixin, torch.nn.Module):
         self.org_module[0].forward = self.forward
         # del self.org_module
 
+    def detach(self):
+        if hasattr(self, 'org_forward'):
+            self.org_module[0].forward = self.org_forward
+
 
 class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
     NUM_OF_BLOCKS = 12  # フルモデル相当でのup,downの層の数

@@ -258,6 +258,8 @@ class ToolkitModuleMixin:
     def forward(self: Module, x, *args, **kwargs):
         skip = False
         network: Network = self.network_ref()
+        if network is None:
+            return self.org_forward(x, *args, **kwargs)
         if network.is_lorm:
             # we are doing lorm
             return self.lorm_forward(x, *args, **kwargs)
@@ -271,7 +273,7 @@ class ToolkitModuleMixin:
             skip = True
 
         # skip if multiplier is 0
-        if network._multiplier == 0:
+        if network.multiplier == 0:
             skip = True
 
         if skip:
@@ -292,7 +294,7 @@ class ToolkitModuleMixin:
         # always cast to float32
         lora_input = x.to(self.lora_down.weight.dtype)
         lora_output = self._call_forward(lora_input)
-        multiplier = self.network_ref().torch_multiplier
+        multiplier = network.torch_multiplier
 
         lora_output_batch_size = lora_output.size(0)
         multiplier_batch_size = multiplier.size(0)
@@ -817,6 +819,11 @@ class ToolkitNetworkMixin:
         self.is_merged_in = False
         for module in self.get_all_modules():
             module.merge_out(merge_weight)
+
+    def detach(self: Network):
+        for module in self.get_all_modules():
+            if hasattr(module, 'detach'):
+                module.detach()
 
     def extract_weight(
             self: Network,

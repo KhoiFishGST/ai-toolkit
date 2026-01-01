@@ -383,6 +383,8 @@ class TrainConfig:
         self.gradient_checkpointing = kwargs.get('gradient_checkpointing', True)
         self.weight_jitter = kwargs.get('weight_jitter', 0.0)
         self.merge_network_on_save = kwargs.get('merge_network_on_save', False)
+        self.merge_lora_path: Optional[str] = kwargs.get('merge_lora_path', kwargs.get('merge_lora', None))
+        self.merge_lora_weight: float = kwargs.get('merge_lora_weight', 1.0)
         self.max_grad_norm = kwargs.get('max_grad_norm', 1.0)
         self.start_step = kwargs.get('start_step', None)
         self.free_u = kwargs.get('free_u', False)
@@ -584,6 +586,8 @@ class ModelConfig:
         self.lora_path = kwargs.get('lora_path', None)
         # mainly for decompression loras for distilled models
         self.assistant_lora_path = kwargs.get('assistant_lora_path', None)
+        self.merge_lora_path = kwargs.get('merge_lora_path', kwargs.get('merge_lora', None))
+        self.merge_lora_weight = kwargs.get('merge_lora_weight', 1.0)
         self.inference_lora_path = kwargs.get('inference_lora_path', None)
         self.latent_space_version = kwargs.get('latent_space_version', None)
 
