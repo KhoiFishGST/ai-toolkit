@@ -406,6 +406,15 @@ class ToolkitModuleMixin:
         # set weight to org_module
         org_sd[weight_key] = weight.to(weight_device, orig_dtype)
         self.org_module[0].load_state_dict(org_sd)
+    
+    def reset_weights(self: Module):
+        # reset the weights to zero
+        org_sd = self.state_dict()
+        for key in org_sd.keys():
+            # only reset lora up
+            if 'lora_up' in key:
+                org_sd[key] = torch.zeros_like(org_sd[key])
+        self.load_state_dict(org_sd)
 
     def setup_lorm(self: Module, state_dict: Optional[Dict[str, Any]] = None):
         # LoRM (Low Rank Middle) is a method reduce the number of parameters in a module while keeping the inputs and
@@ -548,7 +557,8 @@ class ToolkitNetworkMixin:
 
             new_save_dict = {}
             for key, value in save_dict.items():
-                if key.endswith('.alpha'):
+                # lokr needs alpha
+                if key.endswith('.alpha') and self.network_type.lower() != "lokr":
                     continue
                 new_key = key
                 new_key = new_key.replace('lora_down', 'lora_A')
@@ -560,7 +570,7 @@ class ToolkitNetworkMixin:
             save_dict = new_save_dict
         
                 
-        if self.network_type.lower() == "lokr":
+        if self.network_type.lower() == "lokr" and self.use_old_lokr_format:
             new_save_dict = {}
             for key, value in save_dict.items():
                 # lora_transformer_transformer_blocks_7_attn_to_v.lokr_w1 to lycoris_transformer_blocks_7_attn_to_v.lokr_w1
@@ -634,7 +644,7 @@ class ToolkitNetworkMixin:
                 # lora_down = lora_A
                 # lora_up = lora_B
                 # no alpha
-                if load_key.endswith('.alpha'):
+                if load_key.endswith('.alpha') and self.network_type.lower() != "lokr":
                     continue
                 load_key = load_key.replace('lora_A', 'lora_down')
                 load_key = load_key.replace('lora_B', 'lora_up')
@@ -642,6 +652,13 @@ class ToolkitNetworkMixin:
                 load_key = load_key.replace('.', '$$')
                 load_key = load_key.replace('$$lora_down$$', '.lora_down.')
                 load_key = load_key.replace('$$lora_up$$', '.lora_up.')
+                
+                # patch lokr, not sure why we need to but whatever
+                if self.network_type.lower() == "lokr":
+                    load_key = load_key.replace('$$lokr_w1', '.lokr_w1')
+                    load_key = load_key.replace('$$lokr_w2', '.lokr_w2')
+                    if load_key.endswith('$$alpha'):
+                        load_key = load_key[:-7] + '.alpha'
             
             if self.network_type.lower() == "lokr":
                 # lora_transformer_transformer_blocks_7_attn_to_v.lokr_w1 to lycoris_transformer_blocks_7_attn_to_v.lokr_w1
@@ -805,6 +822,10 @@ class ToolkitNetworkMixin:
         # not supported
         self.is_checkpointing = False
         self._update_checkpointing()
+    
+    def reset_weights(self: Network):
+        for module in self.get_all_modules():
+            module.reset_weights()
 
     def merge_in(self, merge_weight=1.0):
         if self.network_type.lower() == 'dora':
